@@ -20,6 +20,7 @@ This project preserves the core behavior of the original bot:
 - **Admin commands** for linking, unlinking, lookup, listing, and moving
 - **Cooldown control** for move operations
 - **Dry-run mode** to validate behavior before real moves
+- **Automatic map-end return** of mapped red/blue players to the default voice channel
 - **Redis-backed storage** via minqlx (`self.db`)
 
 ---
@@ -89,6 +90,8 @@ All commands use your server prefix (usually `!`).
   - `teams`: move blue/red roster members to their configured team voice channels
   - `default`: move blue/red roster members back to default voice channel
 
+  About two seconds after a non-aborted game ends, the plugin automatically runs the `default` move for the red/blue roster captured at game end. Like the manual move, this requires a SteamID-to-Discord mapping for each player. Automatic moves bypass the chat command permission and cooldown checks, but still honor dry-run mode.
+
 - `!link <client_id|steam_id> <discord_user_id> [discord_name]`
   - creates/updates mapping
 
@@ -137,6 +140,7 @@ Functional mapping:
   - Linking is handled by admin commands in-game/console.
 - Only players currently in **red/blue** are considered for move operations.
   - Spectators/free players are not moved by `!move`.
+- The plugin cannot move every person currently in the configured Discord team voice channels regardless of mapping. It uses the Discord REST API with individual user IDs; discovering everyone in a channel requires a Discord Gateway connection to receive voice-state events.
 - Name lookups are optional convenience indexes; canonical identity is Discord user ID.
 
 ---
@@ -146,4 +150,3 @@ Functional mapping:
 - Use `qlx_dmoverDryRun 1` first to verify mapping completeness and command flow.
 - If Discord rate limits (`429`) occur, plugin performs one short retry.
 - Any failed move response is surfaced to command output for troubleshooting.
-

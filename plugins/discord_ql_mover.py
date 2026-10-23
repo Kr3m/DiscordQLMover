@@ -34,10 +34,33 @@ class discord_ql_mover(minqlx.Plugin):
         self.add_command("unlink", self.cmd_unlink, usage="<client_id|steam_id|discord_user_id>")
         self.add_command("whois", self.cmd_whois, usage="<client_id|steam_id|discord_user_id|discord_name>")
         self.add_command("links", self.cmd_links, usage="[limit]")
+        self.add_hook("game_end", self.handle_game_end)
 
         self._last_move_ts = 0.0
 
     # ---------- Commands ----------
+    def handle_game_end(self, data):
+        if data["ABORTED"]:
+            return
+
+        teams = self.teams()
+        team_snapshot = (
+            [(player.clean_name, str(player.steam_id)) for player in teams.get("blue", [])],
+            [(player.clean_name, str(player.steam_id)) for player in teams.get("red", [])],
+        )
+        self._move_default_after_game_end(team_snapshot)
+
+    @minqlx.delay(2)
+    @minqlx.thread
+    def _move_default_after_game_end(self, team_snapshot):
+        config_error = self._validate_runtime_config()
+        if config_error is not None:
+            self.msg("^1[DMover]^7 Automatic map-end move skipped: {}".format(config_error))
+            return
+
+        self.msg("^2[DMover]^7 Map ended; returning mapped red/blue players to the default voice channel.")
+        self._execute_move("default", minqlx.CHAT_CHANNEL, team_snapshot)
+
     def cmd_move(self, player, msg, channel):
         if not self._require_permission(player, channel):
             return minqlx.RET_STOP_ALL
@@ -187,7 +210,7 @@ class discord_ql_mover(minqlx.Plugin):
 
     # ---------- Move flow ----------
     @minqlx.thread
-    def _execute_move(self, action, channel):
+    def _execute_move(self, action, channel, team_snapshot=None):
         token = self.get_cvar("qlx_dmoverDiscordBotToken")
         guild_id = self.get_cvar("qlx_dmoverDiscordGuildId")
         default_channel = self.get_cvar("qlx_dmoverDefaultChannelId")
@@ -195,40 +218,42 @@ class discord_ql_mover(minqlx.Plugin):
         blue_channel = self.get_cvar("qlx_dmoverBlueChannelId")
         dry_run = self.get_cvar("qlx_dmoverDryRun", bool)
 
-        teams = self.teams()
-        blue_players = teams.get("blue", [])
-        red_players = teams.get("red", [])
+        if team_snapshot is None:
+            teams = self.teams()
+            blue_players = [(player.clean_name, str(player.steam_id)) for player in teams.get("blue", [])]
+            red_players = [(player.clean_name, str(player.steam_id)) for player in teams.get("red", [])]
+        else:
+            blue_players, red_players = team_snapshot
 
         moved = []
         missing = []
         failed = []
 
-        for player in blue_players:
+        for player_name, steam_id in blue_players:
             target_channel = blue_channel if action == "teams" else default_channel
-            self._move_player(player, guild_id, token, target_channel, dry_run, moved, missing, failed)
+            self._move_player(player_name, steam_id, guild_id, token, target_channel, dry_run, moved, missing, failed)
 
-        for player in red_players:
+        for player_name, steam_id in red_players:
             target_channel = red_channel if action == "teams" else default_channel
-            self._move_player(player, guild_id, token, target_channel, dry_run, moved, missing, failed)
+            self._move_player(player_name, steam_id, guild_id, token, target_channel, dry_run, moved, missing, failed)
 
         self._report_move_result(action, channel, moved, missing, failed, dry_run)
 
-    def _move_player(self, player, guild_id, token, target_channel, dry_run, moved, missing, failed):
-        steam_id = str(player.steam_id)
+    def _move_player(self, player_name, steam_id, guild_id, token, target_channel, dry_run, moved, missing, failed):
         discord_id = self._get_discord_by_steam(steam_id)
         if discord_id is None:
-            missing.append((player.clean_name, steam_id))
+            missing.append((player_name, steam_id))
             return
 
         if dry_run:
-            moved.append((player.clean_name, steam_id, discord_id, "dry-run"))
+            moved.append((player_name, steam_id, discord_id, "dry-run"))
             return
 
         ok, status, body = self._discord_move_member(guild_id, discord_id, target_channel, token)
         if ok:
-            moved.append((player.clean_name, steam_id, discord_id, str(status)))
+            moved.append((player_name, steam_id, discord_id, str(status)))
         else:
-            failed.append((player.clean_name, steam_id, discord_id, status, body))
+            failed.append((player_name, steam_id, discord_id, status, body))
 
     def _discord_move_member(self, guild_id, discord_id, channel_id, token):
         payload = json.dumps({"channel_id": str(channel_id)}).encode("utf-8")
