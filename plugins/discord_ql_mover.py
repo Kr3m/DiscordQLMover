@@ -15,6 +15,7 @@ class discord_ql_mover(minqlx.Plugin):
     KEY_DISCORD_NAME = "minqlx:dmover:discord_name:{}"
     KEY_NAME_TO_DISCORD = "minqlx:dmover:discord_name_to_id:{}"
     KEY_LINKS_SET = "minqlx:dmover:links"
+    KEY_MINQLX_PLAYER_NAMES = "minqlx:players:{}"
 
     def __init__(self):
         super().__init__()
@@ -28,6 +29,7 @@ class discord_ql_mover(minqlx.Plugin):
         self.set_cvar_once("qlx_dmoverCommandPermission", "2")
         self.set_cvar_once("qlx_dmoverDryRun", "0")
         self.set_cvar_once("qlx_dmoverRequestTimeoutSeconds", "8")
+        self.set_cvar_once("qlx_dmoverSteamApiKey", "")
         self.set_cvar_once("qlx_dmoverAutoMoveTeamsOnCountdown", "1")
         self.set_cvar_once("qlx_dmoverAutoMoveDefaultOnGameEnd", "1")
         self.set_cvar_once("qlx_dmoverAutoMoveTeamsMinInterval", "20")
@@ -211,7 +213,118 @@ class discord_ql_mover(minqlx.Plugin):
         else:
             channel.reply("^2[DMover]^7 steam ^6{}^7 <-> discord ^6{}^7."
                           .format(steam_id, discord_id))
+
+        if steam_id is not None:
+            self._append_whois_steam_persona_name(steam_id, channel)
         return minqlx.RET_STOP_ALL
+
+    @minqlx.thread
+    def _append_whois_steam_persona_name(self, steam_id, channel):
+        persona_name = self._resolve_steam_persona_name(steam_id)
+        if persona_name is None:
+            return
+        self._reply_whois_steam_persona_name(channel, persona_name)
+
+    @minqlx.next_frame
+    def _reply_whois_steam_persona_name(self, channel, persona_name):
+        channel.reply("^2[DMover]^7 Steam persona: ^6{}^7.".format(persona_name))
+
+    def _resolve_steam_persona_name(self, steam_id):
+        try:
+            sid = int(steam_id)
+        except (TypeError, ValueError):
+            self.logger.warning("Failed to resolve Steam persona: invalid steam id '%s'.", steam_id)
+            return None
+
+        connected_player = self.player(sid)
+        if connected_player is not None:
+            return connected_player.clean_name
+
+        cached_name = self._resolve_cached_player_name(sid)
+        if cached_name is not None:
+            return cached_name
+
+        return self._resolve_steam_name_from_api(sid)
+
+    def _resolve_cached_player_name(self, steam_id):
+        key = self.KEY_MINQLX_PLAYER_NAMES.format(steam_id)
+        if key not in self.db:
+            return None
+
+        recent_names = self.db.lrange(key, 0, 0)
+        if not recent_names:
+            return None
+
+        cached_name = self.clean_text(self._decode(recent_names[0])).strip()
+        if not cached_name:
+            return None
+
+        return cached_name
+
+    def _resolve_steam_name_from_api(self, steam_id):
+        steam_api_key = self.get_cvar("qlx_dmoverSteamApiKey")
+        if not steam_api_key:
+            self.logger.warning(
+                "Failed to resolve Steam persona for %s: missing qlx_dmoverSteamApiKey and no local name cache.",
+                steam_id,
+            )
+            return None
+
+        timeout_seconds = self.get_cvar("qlx_dmoverRequestTimeoutSeconds", float)
+        url = (
+            "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"
+            "?key={}&steamids={}".format(steam_api_key, steam_id)
+        )
+
+        try:
+            with urllib.request.urlopen(url, timeout=timeout_seconds) as response:
+                payload = json.load(response)
+        except urllib.error.HTTPError as err:
+            self.logger.warning(
+                "Failed to resolve Steam persona for %s: Steam API HTTP %s.",
+                steam_id,
+                err.code,
+            )
+            return None
+        except urllib.error.URLError as err:
+            self.logger.warning(
+                "Failed to resolve Steam persona for %s: Steam API network error: %s.",
+                steam_id,
+                err.reason,
+            )
+            return None
+        except ValueError:
+            self.logger.warning(
+                "Failed to resolve Steam persona for %s: invalid Steam API JSON response.",
+                steam_id,
+            )
+            return None
+
+        players = payload.get("response", {}).get("players", [])
+        if not players:
+            self.logger.warning(
+                "Failed to resolve Steam persona for %s: Steam API returned no player record.",
+                steam_id,
+            )
+            return None
+
+        persona_name = players[0].get("personaname")
+        if persona_name is None:
+            self.logger.warning(
+                "Failed to resolve Steam persona for %s: Steam API response missing personaname.",
+                steam_id,
+            )
+            return None
+
+        clean_persona_name = self.clean_text(str(persona_name)).strip()
+        if not clean_persona_name:
+            self.logger.warning(
+                "Failed to resolve Steam persona for %s: Steam API returned blank personaname.",
+                steam_id,
+            )
+            return None
+
+        return clean_persona_name
 
     def cmd_links(self, player, msg, channel):
         limit = 20

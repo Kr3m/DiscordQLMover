@@ -80,6 +80,7 @@ Optional:
 - `qlx_dmoverCommandPermission` (default `2`)
 - `qlx_dmoverDryRun` (`1` for testing, default `0`)
 - `qlx_dmoverRequestTimeoutSeconds` (default `8`)
+- `qlx_dmoverSteamApiKey` (optional, used by `!whois` to resolve Steam persona names for offline/unseen players via Steam Web API)
 - `qlx_dmoverAutoMoveTeamsOnCountdown` (`1` enable auto `teams` move when round countdown starts, `0` disable)
 - `qlx_dmoverAutoMoveDefaultOnGameEnd` (`1` enable auto `default` move after non-aborted game end, `0` disable)
 - `qlx_dmoverAutoMoveTeamsMinInterval` (default `20`, minimum seconds between automatic countdown-triggered `teams` moves)
@@ -108,6 +109,10 @@ All commands use your server prefix (usually `!`).
 
 - `!whois <client_id|steam_id|discord_user_id|discord_name>`
   - queries mapping
+  - additionally appends Steam persona name when available:
+    - connected players: current in-server name
+    - previously seen players: latest cached name from `minqlx:players:<steam_id>`
+    - fallback: Steam Web API (`ISteamUser/GetPlayerSummaries`) when `qlx_dmoverSteamApiKey` is configured
 
 - `!links [limit]`
   - list stored links (default 20, max 100)
@@ -156,6 +161,7 @@ Functional mapping:
 ## Operational notes
 
 - Use `qlx_dmoverDryRun 1` first to verify mapping completeness and command flow.
+- `!whois` always returns the original mapping line even if persona lookup fails; name lookup failures are logged and do not break command output.
 - Keep `qlx_dmoverAutoMoveTeamsOnCountdown` and `qlx_dmoverAutoMoveDefaultOnGameEnd` at `1` to enable the full automatic flow, or set either to `0` to disable that specific automation.
 - If Discord rate limits (`429`) occur, plugin performs one short retry.
 - Any failed move response is surfaced to command output for troubleshooting.
