@@ -20,6 +20,7 @@ This project preserves the core behavior of the original bot:
 - **Admin commands** for linking, unlinking, lookup, listing, and moving
 - **Cooldown control** for move operations
 - **Dry-run mode** to validate behavior before real moves
+- **Automatic round-start team move** (`game_countdown` -> `teams`)
 - **Automatic map-end return** of mapped red/blue players to the default voice channel
 - **Redis-backed storage** via minqlx (`self.db`)
 
@@ -79,6 +80,9 @@ Optional:
 - `qlx_dmoverCommandPermission` (default `2`)
 - `qlx_dmoverDryRun` (`1` for testing, default `0`)
 - `qlx_dmoverRequestTimeoutSeconds` (default `8`)
+- `qlx_dmoverAutoMoveTeamsOnCountdown` (`1` enable auto `teams` move when round countdown starts, `0` disable)
+- `qlx_dmoverAutoMoveDefaultOnGameEnd` (`1` enable auto `default` move after non-aborted game end, `0` disable)
+- `qlx_dmoverAutoMoveTeamsMinInterval` (default `20`, minimum seconds between automatic countdown-triggered `teams` moves)
 
 ---
 
@@ -90,7 +94,11 @@ All commands use your server prefix (usually `!`).
   - `teams`: move blue/red roster members to their configured team voice channels
   - `default`: move blue/red roster members back to default voice channel
 
-  About two seconds after a non-aborted game ends, the plugin automatically runs the `default` move for the red/blue roster captured at game end. Like the manual move, this requires a SteamID-to-Discord mapping for each player. Automatic moves bypass the chat command permission and cooldown checks, but still honor dry-run mode.
+  Automatic move behavior:
+  - On `game_countdown` (match starting), the plugin can automatically run the same `teams` move path used by manual `!move teams`.
+  - About two seconds after a non-aborted game ends, the plugin can automatically run the same `default` move path used by manual `!move default` for the red/blue roster captured at game end.
+
+  Like the manual move, auto moves require SteamID-to-Discord mappings. Auto moves bypass chat command permission and manual command cooldown checks, but still honor dry-run mode. Countdown auto-moves are interval-guarded by `qlx_dmoverAutoMoveTeamsMinInterval` to prevent repeated triggers.
 
 - `!link <client_id|steam_id> <discord_user_id> [discord_name]`
   - creates/updates mapping
@@ -148,5 +156,6 @@ Functional mapping:
 ## Operational notes
 
 - Use `qlx_dmoverDryRun 1` first to verify mapping completeness and command flow.
+- Keep `qlx_dmoverAutoMoveTeamsOnCountdown` and `qlx_dmoverAutoMoveDefaultOnGameEnd` at `1` to enable the full automatic flow, or set either to `0` to disable that specific automation.
 - If Discord rate limits (`429`) occur, plugin performs one short retry.
 - Any failed move response is surfaced to command output for troubleshooting.

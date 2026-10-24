@@ -28,19 +28,54 @@ class discord_ql_mover(minqlx.Plugin):
         self.set_cvar_once("qlx_dmoverCommandPermission", "2")
         self.set_cvar_once("qlx_dmoverDryRun", "0")
         self.set_cvar_once("qlx_dmoverRequestTimeoutSeconds", "8")
+        self.set_cvar_once("qlx_dmoverAutoMoveTeamsOnCountdown", "1")
+        self.set_cvar_once("qlx_dmoverAutoMoveDefaultOnGameEnd", "1")
+        self.set_cvar_once("qlx_dmoverAutoMoveTeamsMinInterval", "20")
 
         self.add_command(("move", "dmove"), self.cmd_move, usage="<teams|default>")
         self.add_command("link", self.cmd_link, usage="<client_id|steam_id> <discord_user_id> [discord_name]")
         self.add_command("unlink", self.cmd_unlink, usage="<client_id|steam_id|discord_user_id>")
         self.add_command("whois", self.cmd_whois, usage="<client_id|steam_id|discord_user_id|discord_name>")
         self.add_command("links", self.cmd_links, usage="[limit]")
+        self.add_hook("game_countdown", self.handle_game_countdown)
         self.add_hook("game_end", self.handle_game_end)
 
         self._last_move_ts = 0.0
+        self._last_auto_teams_move_ts = 0.0
 
     # ---------- Commands ----------
+    def handle_game_countdown(self, *_args, **_kwargs):
+        if not self.get_cvar("qlx_dmoverAutoMoveTeamsOnCountdown", bool):
+            return
+        self._move_teams_on_game_countdown()
+
+    @minqlx.delay(1)
+    @minqlx.thread
+    def _move_teams_on_game_countdown(self):
+        if not self._should_auto_move_teams_now():
+            return
+
+        config_error = self._validate_runtime_config()
+        if config_error is not None:
+            self.msg("^1[DMover]^7 Automatic countdown move skipped: {}".format(config_error))
+            return
+
+        self._last_auto_teams_move_ts = time.time()
+        self.msg("^2[DMover]^7 Match starting; moving mapped players to their team voice channels.")
+        self._execute_move("teams", minqlx.CHAT_CHANNEL)
+
+    def _should_auto_move_teams_now(self):
+        min_interval = self.get_cvar("qlx_dmoverAutoMoveTeamsMinInterval", float)
+        if min_interval <= 0:
+            return True
+
+        now = time.time()
+        return now >= self._last_auto_teams_move_ts + min_interval
+
     def handle_game_end(self, data):
         if data["ABORTED"]:
+            return
+        if not self.get_cvar("qlx_dmoverAutoMoveDefaultOnGameEnd", bool):
             return
 
         teams = self.teams()
