@@ -92,13 +92,15 @@ Optional:
 All commands use your server prefix (usually `!`).
 
 - `!move <teams|default>`
-  - `teams`: move blue/red roster members to their configured team voice channels
+  - `teams`: move blue/red roster members to their configured team voice channels only when they are currently in the default lobby channel
   - `default`: move only tracked match players (users previously moved by `teams`) back to default voice channel
 
   Automatic move behavior:
   - On `game_countdown` (match starting), the plugin can automatically run the same `teams` move path used by manual `!move teams`.
   - About two seconds after a non-aborted game ends, the plugin can automatically run the same `default` move path used by manual `!move default` for the red/blue roster captured at game end.
-  - Safety: map-end/default moves only affect tracked match players, so unrelated users in red/blue channels are left untouched.
+  - Safety:
+    - countdown/manual `teams` moves do not move users who are already in red/blue or in any non-default/custom channel.
+    - map-end/default moves only affect tracked match players currently in red/blue, so unrelated users are left untouched.
 
   Like the manual move, auto moves require SteamID-to-Discord mappings. Auto moves bypass chat command permission and manual command cooldown checks, but still honor dry-run mode. Countdown auto-moves are interval-guarded by `qlx_dmoverAutoMoveTeamsMinInterval` to prevent repeated triggers. The tracked-user state is in-memory and resets on plugin restart; it is also reset when a new `teams` move begins.
 
